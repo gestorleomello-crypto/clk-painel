@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Gera index.html público só com indicadores agregados.")
     p.add_argument("--repo", default="/workspace/clk-git/repo", help="Caminho do repositório local")
     p.add_argument("--out", default=str(Path(__file__).resolve().parent), help="Pasta de saída")
+    p.add_argument("--data", default="", help="data.json da central (só contagens agregadas entram no HTML)")
     return p.parse_args()
 
 
@@ -302,6 +303,17 @@ def render(data: dict) -> str:
       <div class="stat"><strong>{data["descartes"]}</strong><span>Descartadas</span></div>
     </div>
 
+    <h2>Contatos e follow-ups (agregados)</h2>
+    <p style="font-size:13px;margin:0 0 12px">Só contagens. Sem nomes, perfis ou mensagens. Ausência de fonte não é omitida: quando o arquivo de registros existe e está vazio, o valor é zero real.</p>
+    <div class="grid">
+      <div class="stat"><strong>{(data.get("contatos") or {}).get("validadas", data["etapas"].get("VALIDADA", 0))}</strong><span>Validadas</span></div>
+      <div class="stat"><strong>{(data.get("contatos") or {}).get("prontas", data["etapas"].get("PRONTA", 0))}</strong><span>Prontas</span></div>
+      <div class="stat"><strong>{(data.get("contatos") or {}).get("contatadas", 0)}</strong><span>Contatadas</span></div>
+      <div class="stat"><strong>{(data.get("contatos") or {}).get("respostas", 0)}</strong><span>Respostas</span></div>
+      <div class="stat"><strong>{(data.get("contatos") or {}).get("followups_abertos", 0)}</strong><span>Follow-ups abertos</span></div>
+      <div class="stat"><strong>{(data.get("contatos") or {}).get("reunioes", 0)}</strong><span>Reuniões</span></div>
+    </div>
+
     <h2>Evolução</h2>
     <div class="legend">
       <span class="dot" style="background:#102117"></span> Fichas
@@ -344,12 +356,52 @@ def render(data: dict) -> str:
 """
 
 
+def aplicar_agregados(base: dict, data_path: Path) -> dict:
+    """Incorpora só contagens de etapa, contato e follow-up. Ignora qualquer nome."""
+    bruto = json.loads(data_path.read_text(encoding="utf-8"))
+    ind = bruto.get("indicadores") or {}
+    etapas = {nome: 0 for nome in list(ETAPAS_COMERCIAIS) + ["DESCARTADA", "PENDENTE", "NÃO CONTATAR", "PRONTA PARA ABORDAGEM"]}
+    for marca in bruto.get("marcas") or []:
+        # use only the etapa field; never copy names
+        etapa = marca.get("etapa") if isinstance(marca, dict) else None
+        if etapa:
+            etapas[etapa] = etapas.get(etapa, 0) + 1
+    # map PRONTA PARA ABORDAGEM onto prontas display
+    if "PRONTA PARA ABORDAGEM" in etapas:
+        etapas["PRONTA"] = etapas.get("PRONTA", 0) + etapas["PRONTA PARA ABORDAGEM"]
+    base["etapas"] = etapas
+    def num(chave: str, default: int = 0) -> int:
+        item = ind.get(chave) or {}
+        valor = item.get("valor")
+        return default if valor is None else int(valor)
+    base["contatos"] = {
+        "contatadas": num("contatadas"),
+        "respostas": num("respostas"),
+        "followups_abertos": num("followups_abertos"),
+        "reunioes": num("reunioes"),
+        "prontas": num("prontas"),
+        "validadas": num("validadas"),
+    }
+    if "atualizado_em" in bruto and bruto["atualizado_em"]:
+        # data.json uses gerado_em already formatted
+        pass
+    if bruto.get("gerado_em"):
+        base["atualizado_em"] = bruto["gerado_em"]
+    return base
+
+
 def main() -> None:
     args = parse_args()
     repo = Path(args.repo).resolve()
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    html = render(carregar(repo))
+    dados = carregar(repo)
+    if args.data:
+        dp = Path(args.data)
+        if not dp.is_file():
+            raise SystemExit(f"data.json não encontrado: {dp}")
+        dados = aplicar_agregados(dados, dp)
+    html = render(dados)
     destino = out / "index.html"
     destino.write_text(html, encoding="utf-8")
     print(f"Gerado {destino}")
