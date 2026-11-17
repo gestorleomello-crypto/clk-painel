@@ -369,11 +369,28 @@ def aplicar_agregados(base: dict, data_path: Path) -> dict:
     # map PRONTA PARA ABORDAGEM onto prontas display
     if "PRONTA PARA ABORDAGEM" in etapas:
         etapas["PRONTA"] = etapas.get("PRONTA", 0) + etapas["PRONTA PARA ABORDAGEM"]
-    base["etapas"] = etapas
     def num(chave: str, default: int = 0) -> int:
         item = ind.get(chave) or {}
         valor = item.get("valor")
         return default if valor is None else int(valor)
+    # Pipeline público usa indicadores (contagens oficiais), não a etapa atual isolada.
+    # Uma marca PRONTA PARA ABORDAGEM também é validada; não mostrar 0 em Validadas.
+    etapas["PESQUISADA"] = num("pesquisadas", etapas.get("PESQUISADA", 0))
+    etapas["VALIDADA"] = num("validadas", etapas.get("VALIDADA", 0))
+    etapas["PRONTA"] = num("prontas", etapas.get("PRONTA", 0))
+    etapas["CONTATADA"] = num("contatadas", etapas.get("CONTATADA", 0))
+    etapas["RESPONDEU"] = num("respostas", etapas.get("RESPONDEU", 0))
+    etapas["REUNIÃO"] = num("reunioes", etapas.get("REUNIÃO", 0))
+    base["etapas"] = etapas
+    notas = {}
+    for marca in bruto.get("marcas") or []:
+        if not isinstance(marca, dict):
+            continue
+        nota = marca.get("nota")
+        if nota and nota not in {"NÃO VERIFICADO", "Nao VERIFICADO"}:
+            notas[nota] = notas.get(nota, 0) + 1
+    if notas:
+        base["notas"] = notas
     base["contatos"] = {
         "contatadas": num("contatadas"),
         "respostas": num("respostas"),
